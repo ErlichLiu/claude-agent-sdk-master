@@ -230,7 +230,9 @@ MIT License - 自由使用，欢迎改进和分享
 
 ---
 
-<iframe style="width:100%;height:auto;min-width:600px;min-height:400px;" src="https://www.star-history.com/embed?secret=Z2hwX0ppWW1DbnJSMmlIMVc1b3RaQmk5aEZjNXI3WGdBSDRLNU9kNg==#ErlichLiu/claude-agent-sdk-master.git&type=date&legend=top-left" frameBorder="0"></iframe>
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=ErlichLiu/claude-agent-sdk-master.git&type=date&legend=top-left)](https://www.star-history.com/#ErlichLiu/claude-agent-sdk-master.git&type=date&legend=top-left)
 
 <p align="center">
   <strong>🎓 开始学习：</strong>
