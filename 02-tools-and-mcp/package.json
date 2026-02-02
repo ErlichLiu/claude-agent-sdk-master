@@ -19,6 +19,7 @@
     "@tailwindcss/typography": "^0.5.19",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "framer-motion": "^12.30.0",
     "highlight.js": "^11.11.1",
     "lucide-react": "^0.563.0",
     "next": "16.1.6",

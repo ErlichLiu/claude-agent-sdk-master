@@ -125,3 +125,62 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ============================================================================
+   Spinner Animation (3x3 Grid)
+   ============================================================================ */
+
+@keyframes spinner-grid {
+  0%, 70%, 100% {
+    transform: scale3D(1, 1, 1);
+  }
+  35% {
+    transform: scale3D(0, 0, 1);
+  }
+}
+
+@layer components {
+  .spinner {
+    display: inline-grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.15em;
+    width: 1em;
+    height: 1em;
+  }
+
+  .spinner-cube {
+    width: 100%;
+    height: 100%;
+    background-color: currentColor;
+    animation: spinner-grid 1.3s infinite ease-in-out;
+  }
+
+  /* Staggered animation delays for 3x3 grid */
+  .spinner-cube:nth-child(1) { animation-delay: 0.2s; }
+  .spinner-cube:nth-child(2) { animation-delay: 0.3s; }
+  .spinner-cube:nth-child(3) { animation-delay: 0.4s; }
+  .spinner-cube:nth-child(4) { animation-delay: 0.1s; }
+  .spinner-cube:nth-child(5) { animation-delay: 0.2s; }
+  .spinner-cube:nth-child(6) { animation-delay: 0.3s; }
+  .spinner-cube:nth-child(7) { animation-delay: 0s; }
+  .spinner-cube:nth-child(8) { animation-delay: 0.1s; }
+  .spinner-cube:nth-child(9) { animation-delay: 0.2s; }
+}
+
+/* ============================================================================
+   Tool Activity Colors
+   ============================================================================ */
+
+:root {
+  --tool-success: hsl(142, 76%, 36%);
+  --tool-error: hsl(0, 72%, 51%);
+  --tool-running: hsl(221, 83%, 53%);
+  --tool-pending: hsl(0, 0%, 63%);
+}
+
+.dark {
+  --tool-success: hsl(142, 71%, 45%);
+  --tool-error: hsl(0, 84%, 60%);
+  --tool-running: hsl(221, 83%, 63%);
+  --tool-pending: hsl(0, 0%, 45%);
+}

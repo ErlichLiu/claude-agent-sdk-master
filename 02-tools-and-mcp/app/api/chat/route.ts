@@ -20,6 +20,22 @@ import { PromaAgent, type AgentEvent } from '@02-tools-and-mcp/shared/agent';
 import type { ChatMessage } from '@02-tools-and-mcp/core';
 import { getStorage } from '@/lib/storage';
 
+/**
+ * 工具活动临时存储（用于最终保存到消息中）
+ */
+interface ToolActivityRecord {
+  toolUseId: string;
+  toolName: string;
+  toolInput?: Record<string, unknown>;
+  toolResult?: string;
+  toolStatus?: 'pending' | 'running' | 'completed' | 'failed';
+  toolIntent?: string;
+  toolDisplayName?: string;
+  startTime?: number;
+  endTime?: number;
+  isError?: boolean;
+}
+
 interface ChatRequest {
   message: string;
   sessionId?: string;
@@ -62,6 +78,7 @@ export async function POST(req: NextRequest) {
           let assistantContent = '';
           const assistantMessageId = `msg-${Date.now()}-assistant`;
           const isNewSession = !shouldResume;
+          const toolActivities = new Map<string, ToolActivityRecord>();
 
           console.log('🔍 Starting chat:', {
             hasSessionId: !!finalSessionId,
@@ -120,7 +137,8 @@ export async function POST(req: NextRequest) {
               finalSessionId,
               assistantContent,
               (content) => { assistantContent = content; },
-              assistantMessageId
+              assistantMessageId,
+              toolActivities
             );
           }
 
@@ -183,7 +201,8 @@ async function handleAgentEvent(
   sessionId: string | undefined,
   assistantContent: string,
   setAssistantContent: (content: string) => void,
-  assistantMessageId: string
+  assistantMessageId: string,
+  toolActivities: Map<string, ToolActivityRecord>
 ): Promise<void> {
   switch (event.type) {
     case 'text_delta': {
@@ -216,6 +235,17 @@ async function handleAgentEvent(
       // 工具开始调用
       console.log('🔧 Tool start:', event.toolName, event.toolUseId);
 
+      // 记录工具活动
+      toolActivities.set(event.toolUseId, {
+        toolUseId: event.toolUseId,
+        toolName: event.toolName,
+        toolInput: event.input,
+        toolIntent: event.intent,
+        toolDisplayName: event.displayName,
+        toolStatus: 'running',
+        startTime: Date.now(),
+      });
+
       // 发送工具开始事件到前端
       const data = JSON.stringify({
         type: 'tool_start',
@@ -235,6 +265,26 @@ async function handleAgentEvent(
     case 'tool_result': {
       // 工具执行结果
       console.log('✅ Tool result:', event.toolUseId, event.isError ? '(error)' : '(success)');
+
+      // 更新工具活动记录
+      const activity = toolActivities.get(event.toolUseId);
+      if (activity) {
+        activity.toolResult = event.result;
+        activity.toolStatus = event.isError ? 'failed' : 'completed';
+        activity.isError = event.isError;
+        activity.endTime = Date.now();
+      } else {
+        // 如果没有对应的 tool_start，创建新记录
+        toolActivities.set(event.toolUseId, {
+          toolUseId: event.toolUseId,
+          toolName: event.toolName || 'Unknown',
+          toolInput: event.input,
+          toolResult: event.result,
+          toolStatus: event.isError ? 'failed' : 'completed',
+          isError: event.isError,
+          endTime: Date.now(),
+        });
+      }
 
       // 发送工具结果事件到前端
       const data = JSON.stringify({
@@ -258,7 +308,7 @@ async function handleAgentEvent(
         break;
       }
 
-      // 保存助手消息
+      // 1. 保存助手消息
       const assistantMessage: ChatMessage = {
         id: assistantMessageId,
         role: 'assistant',
@@ -267,7 +317,36 @@ async function handleAgentEvent(
       };
       await storage.appendMessage(sessionId, assistantMessage);
 
-      // 更新会话元数据
+      // 2. 保存所有工具活动作为独立消息
+      for (const [toolUseId, activity] of toolActivities) {
+        const toolMessage: ChatMessage = {
+          id: `tool-${toolUseId}`,
+          role: 'tool',
+          content: activity.toolResult || '',
+          timestamp: activity.endTime || Date.now(),
+          toolName: activity.toolName,
+          toolUseId: activity.toolUseId,
+          toolInput: activity.toolInput,
+          toolResult: activity.toolResult,
+          toolStatus: activity.toolStatus,
+          toolDuration: activity.startTime && activity.endTime
+            ? activity.endTime - activity.startTime
+            : undefined,
+          toolIntent: activity.toolIntent,
+          toolDisplayName: activity.toolDisplayName,
+        };
+        await storage.appendMessage(sessionId, toolMessage);
+
+        // 发送工具消息到前端（让客户端添加到 messages 数组）
+        const toolMessageData = JSON.stringify({
+          type: 'tool_message',
+          data: toolMessage,
+          sessionId,
+        });
+        controller.enqueue(encoder.encode(`data: ${toolMessageData}\n\n`));
+      }
+
+      // 3. 更新会话元数据
       if (event.usage) {
         await storage.updateSessionMetadata(sessionId, {
           state: {

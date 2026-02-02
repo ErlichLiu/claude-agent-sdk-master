@@ -19,6 +19,7 @@ import {
   extractToolResults,
   type ContentBlock,
 } from './tool-matching';
+import { getDefaultOptions, mergeMcpServers, type McpServerConfig } from './options';
 
 // ============================================================================
 // 配置
@@ -35,6 +36,10 @@ export interface PromaAgentConfig {
   resumeSessionId?: string;
   /** 当会话 ID 确定时的回调 */
   onSessionIdUpdate?: (sessionId: string) => void;
+  /** 是否使用完整的默认工具集（默认 true） */
+  useFullToolSet?: boolean;
+  /** 额外的 MCP 服务器 */
+  mcpServers?: Record<string, McpServerConfig>;
 }
 
 // ============================================================================
@@ -63,12 +68,19 @@ export class PromaAgent {
    * ```
    */
   async *chat(userMessage: string): AsyncGenerator<AgentEvent> {
+    // 获取默认工具配置
+    const defaultOptions = getDefaultOptions({
+      workingDirectory: this.config.workingDirectory,
+      useFullToolSet: this.config.useFullToolSet,
+      mcpServers: this.config.mcpServers,
+    });
+
     // 构建查询选项
     const queryOptions: Record<string, unknown> = {
+      ...defaultOptions,
       includePartialMessages: true,
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
-      cwd: this.config.workingDirectory,
     };
 
     // 如果提供了会话 ID，则添加恢复选项

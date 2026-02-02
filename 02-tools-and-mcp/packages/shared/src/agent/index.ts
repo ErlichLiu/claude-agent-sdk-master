@@ -2,3 +2,4 @@
 export * from './proma-agent';
 export * from './agent-event';
 export * from './tool-matching';
+export * from './options';
