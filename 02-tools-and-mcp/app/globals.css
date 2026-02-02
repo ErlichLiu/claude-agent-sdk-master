@@ -140,6 +140,15 @@
 }
 
 @layer components {
+  /* Scrollbar Hide Utility */
+  .scrollbar-hide {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;     /* Firefox */
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;             /* Chrome, Safari, Opera */
+  }
+
   .spinner {
     display: inline-grid;
     grid-template-columns: repeat(3, 1fr);

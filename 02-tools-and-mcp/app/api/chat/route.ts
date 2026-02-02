@@ -41,6 +41,22 @@ interface ChatRequest {
   sessionId?: string;
 }
 
+/**
+ * 安全地关闭 ReadableStream controller
+ * 避免在 controller 已关闭时抛出错误
+ */
+function safeCloseController(controller: ReadableStreamDefaultController): void {
+  try {
+    // desiredSize 为 null 表示 controller 已关闭
+    if (controller.desiredSize !== null) {
+      controller.close();
+    }
+  } catch (error) {
+    // 忽略关闭错误（可能已经被 abort 关闭）
+    console.log('Controller already closed:', error instanceof Error ? error.message : 'Unknown error');
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body: ChatRequest = await req.json();
@@ -142,7 +158,7 @@ export async function POST(req: NextRequest) {
             );
           }
 
-          controller.close();
+          safeCloseController(controller);
         } catch (error) {
           console.error('❌ Error in agent chat:', error);
           const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -167,7 +183,7 @@ export async function POST(req: NextRequest) {
             },
           });
           controller.enqueue(encoder.encode(`data: ${errorData}\n\n`));
-          controller.close();
+          safeCloseController(controller);
         }
       },
     });

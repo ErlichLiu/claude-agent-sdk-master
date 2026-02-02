@@ -49,8 +49,17 @@ export function ToolActivityList({
   onActivityClick,
   className,
 }: ToolActivityListProps) {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+
   // 显示所有活动（不限制数量，让卡片自动扩展）
   const visibleActivities = activities;
+
+  // 自动滚动到底部
+  React.useEffect(() => {
+    if (autoScroll && containerRef.current) {
+      containerRef.current.scrollTop = containerRef.current.scrollHeight;
+    }
+  }, [activities, autoScroll]);
 
   if (activities.length === 0) {
     return null;
@@ -62,11 +71,16 @@ export function ToolActivityList({
 
   return (
     <div
+      ref={containerRef}
       className={cn(
-        "space-y-0.5 overflow-y-auto",
+        "space-y-0.5 overflow-y-auto scrollbar-hide",
         className
       )}
-      style={{ maxHeight: `${maxHeight}px` }}
+      style={{
+        maxHeight: `${maxHeight}px`,
+        scrollbarWidth: 'none',  // Firefox
+        msOverflowStyle: 'none', // IE/Edge
+      }}
     >
       <AnimatePresence initial={false}>
         {visibleActivities.map((activity, index) => (
