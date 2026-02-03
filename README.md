@@ -47,8 +47,9 @@ Agent SDK 的应用空间巨大，但相比单纯套用 LLM API 以及其他需�
 |------|------|----------|------|
 | **第一章** | 🚀 [快速入门](./01-quick-start) | Workspace、Session、上下文管理、流式对话 | ✅ 已完成 |
 | **第二章** | 🔧 [工具与 MCP](./02-tools-and-mcp) | MCP Tools 集成、Tool Calling、实际 Agent 能力 | ✅ 已完成 |
-| **第三章** | 🖼️ 多模态支持 | 图片、文件上传处理、多媒体渲染 | 📋 计划中 |
-| **第四章** | 🎨 高级特性 | 自定义 System Prompt、成本追踪、流式优化 | 📋 计划中 |
+| **第三章** | 🔐 [MCP 配置与工具权限](./03-mcp-config-and-tools-permission) | MCP 服务器配置、工具权限管理、安全控制 | 📋 计划中 |
+| **第四章** | ✨ [Skills 实现](./04-skills) | 自定义技能系统、技能组合、高级 Agent 行为 | 📋 计划中 |
+| **第五章** | 🎯 [整体优化](./05-optimization) | 性能优化、成本追踪、生产级部署最佳实践 | 📋 计划中 |
 
 > **💡 提示**：本教程随 [Proma](https://github.com/ErlichLiu/proma-oss.git) 实际开发进度持续更新。
 
@@ -100,13 +101,16 @@ claude-agent-sdk-master/
 │   ├── README.md            #    详细教程文档
 │   └── CLAUDE.md            #    Claude Code 开发指引
 │
-├── 02-tools-and-mcp/        # 🔧 第二章：工具与 MCP（开发中）
+├── 02-tools-and-mcp/        # 🔧 第二章：工具与 MCP
 │   └── ...
 │
-├── 03-multimodal/           # 🖼️ 第三章：多模态支持（计划中）
+├── 03-mcp-config-and-tools-permission/  # 🔐 第三章：MCP 配置与工具权限
 │   └── ...
 │
-├── 04-advanced/             # 🎨 第四章：高级特性（计划中）
+├── 04-skills/               # ✨ 第四章：Skills 实现（计划中）
+│   └── ...
+│
+├── 05-optimization/         # 🎯 第五章：整体优化（计划中）
 │   └── ...
 │
 └── README.md                # 📖 本文件（系列教程总览）
@@ -214,9 +218,11 @@ Agent SDK 提供了更高层的抽象：
 <summary><strong>Q: 这个教程会持续更新吗？</strong></summary>
 
 是的！本教程随 **Proma 项目**的开发进度持续更新：
-- ✅ 第一章已完成
-- 🚧 第二章开发中（工具调用）
-- 📋 第三、四章计划中
+- ✅ 第一章已完成（快速入门）
+- ✅ 第二章已完成（工具与 MCP）
+- 📋 第三章计划中（MCP 配置与工具权限）
+- 📋 第四章计划中（Skills 实现）
+- 📋 第五章计划中（整体优化）
 
 关注本仓库获取最新更新通知。
 

@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "declaration": true,
+    "declarationDir": "./dist"
+  },
+  "include": ["src/**/*", "shared/src/agent/proma-agent.ts"],
+  "exclude": ["node_modules", "dist"]
+}
