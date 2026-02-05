@@ -40,7 +40,7 @@ Agent SDK 的应用空间巨大，但相比单纯套用 LLM API 以及其他需�
 ---
 ## 项目赞助商 MiniMax
 
-本教程推荐采用 MiniMax API 更丝滑更具性价比的完成 Claude Agent SDK 的学习，全面兼容所有功能
+本教程推荐采用 MiniMax API 更丝滑更具性价比的完成 Claude Agent SDK 的学习，全面兼容所有功能(订阅 Coding Plan 一样可以生成 Coding Plan api key 来学习和应用到本教程)
 
 ![MiniMax](https://img.erlich.fun/personal-blog/uPic/I0pljV.png)
 
