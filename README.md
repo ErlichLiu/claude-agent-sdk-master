@@ -69,7 +69,7 @@ MiniMax api 获取和注册地址： https://platform.minimaxi.com/login
 
 - **Node.js** 18+
 - **pnpm** 包管理器（推荐）
-- **Anthropic API Key**（可以是支持 Anthropic /v1/messages 的 API）
+- **Anthropic API Key（推荐MiniMax API 即可）** [点击获取 minimax api key](https://platform.minimaxi.com/login)（也可以是支持 Anthropic /v1/messages 的其他 api）
 
 ### 三步开始学习
 
@@ -182,6 +182,7 @@ claude-agent-sdk-master/
 ### 官方文档
 - [Claude Agent SDK 官方文档](https://platform.claude.com/docs/en/agent-sdk/typescript) - TypeScript SDK 官方指南
 - [Anthropic API 文档](https://docs.anthropic.com/) - Claude API 完整文档
+- [MiniMax API 文档](https://platform.minimaxi.com/docs/guides/text-generation) - MiniMax API 完整文档
 
 ### 相关项目
 - [Proma](https://github.com/ErlichLiu/proma-oss.git) - 基于 Agent SDK 的完整开源产品（即将发布）
