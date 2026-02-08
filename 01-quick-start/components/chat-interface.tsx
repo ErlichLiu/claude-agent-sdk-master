@@ -221,7 +221,7 @@ export function ChatInterface() {
                         {message.content}
                       </p>
                     ) : (
-                      <div className="prose prose-sm dark:prose-invert max-w-none">
+                      <div className="prose prose-sm dark:prose-invert max-w-none prose-pre:!bg-[#0d1117] prose-code:!bg-transparent">
                         <MarkdownRenderer content={message.content} />
                         {message.isStreaming && (
                           <span className="ml-1 inline-block h-4 w-1 animate-pulse bg-current" />
