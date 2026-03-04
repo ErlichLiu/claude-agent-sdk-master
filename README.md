@@ -55,9 +55,9 @@ MiniMax api 获取和注册地址，还可领取 88 折的优惠！：https://pl
 | 章节 | 主题 | 核心内容 | 状态 |
 |------|------|----------|------|
 | **第一章** | 🚀 [快速入门](./01-quick-start) | Workspace、Session、上下文管理、流式对话 | ✅ 已完成 |
-| **第二章** | 🔧 [工具与 MCP](./02-tools-and-mcp) | MCP Tools 集成、Tool Calling、实际 Agent 能力 | ✅ 已完成 |
-| **第三章** | 🖼️ 多模态支持 | 图片、文件上传处理、多媒体渲染 | 📋 计划中 |
-| **第四章** | 🎨 高级特性 | 自定义 System Prompt、成本追踪、流式优化 | 📋 计划中 |
+| **第二章** | 🔧 [工具与 MCP](./02-tools-and-mcp) | MCP Tools 集成、Tool Calling、工具活动可视化 | ✅ 已完成 |
+| **第三章** | 🔐 [权限控制](./03-agent-with-permission) | Agent 权限管理、canUseTool 回调、权限 UI | ✅ 已完成 |
+| **第四章** | 🤝 [Agent Teams](./04-agent-teams) | 多 Agent 协作、Orchestrator-Subagent、Auto-Resume | ✅ 已完成 |
 
 > **💡 提示**：本教程随 [Proma](https://github.com/ErlichLiu/proma-oss.git) 实际开发进度持续更新。
 
@@ -141,14 +141,25 @@ claude-agent-sdk-master/
 │   ├── README.md            #    详细教程文档
 │   └── CLAUDE.md            #    Claude Code 开发指引
 │
-├── 02-tools-and-mcp/        # 🔧 第二章：工具与 MCP（开发中）
-│   └── ...
+├── 02-tools-and-mcp/        # 🔧 第二章：工具与 MCP
+│   ├── app/                 #    Next.js App Router + API Routes
+│   ├── components/          #    工具活动可视化组件
+│   ├── packages/shared/     #    PromaAgent 事件驱动架构
+│   ├── packages/core/       #    核心类型定义
+│   └── CLAUDE.md            #    开发指引
 │
-├── 03-multimodal/           # 🖼️ 第三章：多模态支持（计划中）
-│   └── ...
+├── 03-agent-with-permission/ # 🔐 第三章：Agent 权限控制
+│   ├── app/                 #    权限审批 API + 聊天 API
+│   ├── components/          #    权限审批 UI 组件
+│   ├── packages/shared/     #    canUseTool 权限回调
+│   └── CLAUDE.md            #    开发指引
 │
-├── 04-advanced/             # 🎨 第四章：高级特性（计划中）
-│   └── ...
+├── 04-agent-teams/          # 🤝 第四章：Agent Teams 多 Agent 协作
+│   ├── app/                 #    Teams API + Chat API（Auto-Resume）
+│   ├── components/          #    TeammateCard、详情面板
+│   ├── packages/shared/     #    PromaAgent + Agent Teams 事件
+│   ├── lib/                 #    AgentTeamStore 状态管理
+│   └── CLAUDE.md            #    开发指引
 │
 └── README.md                # 📖 本文件（系列教程总览）
 ```
@@ -174,6 +185,13 @@ claude-agent-sdk-master/
 - 📖 **详细文档**：每个项目配备详尽的 README 和 CLAUDE.md 开发指引
 - 🤖 **AI 协作实践**：大部分内容由 Claude Code 编写，展示 AI 辅助开发最佳实践
 - 🇨🇳 **中文优先**：高质量中文技术文档，降低学习门槛
+
+### 技术栈
+
+- **Claude Agent SDK** v0.2.68+ · 默认模型 `claude-sonnet-4-6`
+- **Next.js** 16 (App Router) · **React** 19 · **TypeScript** 5 (strict)
+- **Tailwind CSS** 4 · **Shadcn UI** · **framer-motion**
+- **pnpm** workspace monorepo（02-04 章）
 
 ---
 
@@ -257,9 +275,10 @@ Agent SDK 提供了更高层的抽象：
 <summary><strong>Q: 这个教程会持续更新吗？</strong></summary>
 
 是的！本教程随 **Proma 项目**的开发进度持续更新：
-- ✅ 第一章已完成
-- 🚧 第二章开发中（工具调用）
-- 📋 第三、四章计划中
+- ✅ 第一章已完成（快速入门）
+- ✅ 第二章已完成（工具与 MCP）
+- ✅ 第三章已完成（权限控制）
+- ✅ 第四章已完成（Agent Teams）
 
 关注本仓库获取最新更新通知。
 
@@ -275,7 +294,7 @@ MIT License - 自由使用，欢迎改进和分享
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=ErlichLiu/claude-agent-sdk-master.git&type=date&legend=top-left)](https://www.star-history.com/#ErlichLiu/claude-agent-sdk-master.git&type=date&legend=top-left)
+[![Star History Chart](https://api.star-history.com/svg?repos=ErlichLiu/claude-agent-sdk-master&type=date&legend=top-left)](https://www.star-history.com/#ErlichLiu/claude-agent-sdk-master&type=date&legend=top-left)
 
 <p align="center">
   <strong>🎓 开始学习：</strong>
