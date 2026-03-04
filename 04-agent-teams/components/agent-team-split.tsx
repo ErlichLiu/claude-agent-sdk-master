@@ -4,7 +4,7 @@ import * as React from 'react';
 import {
   Brain, CheckCircle2, XCircle, StopCircle, Loader2,
   Wrench, Clock, FileText, ChevronDown, ChevronUp, ExternalLink,
-  MessageSquare,
+  MessageSquare, Coins,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { TeammateState } from '@/lib/agent-team-store';
@@ -106,6 +106,39 @@ function ToolHistoryRow({ history, currentToolName }: { history: string[]; curre
 }
 
 // ============================================================================
+// SectionHeader — 内容区段标题
+// ============================================================================
+
+function SectionHeader({ icon, title, count }: { icon: React.ReactNode; title: string; count?: number }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-muted-foreground">{icon}</span>
+      <span className="text-[12px] font-medium text-muted-foreground">{title}</span>
+      {count !== undefined && (
+        <span className="text-[11px] text-muted-foreground/50">({count})</span>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// dedupeToolHistory — 统计工具使用频次
+// ============================================================================
+
+interface ToolCount {
+  name: string;
+  count: number;
+}
+
+function dedupeToolHistory(history: string[]): ToolCount[] {
+  const map = new Map<string, number>();
+  for (const tool of history) {
+    map.set(tool, (map.get(tool) ?? 0) + 1);
+  }
+  return Array.from(map.entries()).map(([name, count]) => ({ name, count }));
+}
+
+// ============================================================================
 // TeammateOutputSheet — 产出内容查看抽屉
 // ============================================================================
 
@@ -121,6 +154,7 @@ function TeammateOutputSheet({ teammate, agentName, inboxMessages, open, onOpenC
   const [content, setContent] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [toolsExpanded, setToolsExpanded] = React.useState(false);
 
   React.useEffect(() => {
     if (!open) return;
@@ -148,7 +182,22 @@ function TeammateOutputSheet({ teammate, agentName, inboxMessages, open, onOpenC
   }, [open, teammate.outputFile]);
 
   const typeLabel = getTaskTypeLabel(teammate.taskType);
-  const shortTitle = extractShortTitle(teammate.description);
+  const durationMs = teammate.endedAt
+    ? teammate.endedAt - teammate.startedAt
+    : Date.now() - teammate.startedAt;
+
+  // 过滤掉系统消息，获取有效的 inbox 消息
+  const filteredInbox = React.useMemo(() => {
+    if (!inboxMessages) return [];
+    return inboxMessages.filter((m) => {
+      try {
+        const parsed = JSON.parse(m.text) as Record<string, unknown>;
+        const t = parsed.type;
+        if (t === 'idle_notification' || t === 'shutdown_request' || t === 'shutdown_approved') return false;
+      } catch { /* 非 JSON，保留 */ }
+      return true;
+    });
+  }, [inboxMessages]);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -165,102 +214,169 @@ function TeammateOutputSheet({ teammate, agentName, inboxMessages, open, onOpenC
             </span>
             <StatusBadge status={teammate.status} />
           </div>
-          <SheetTitle className="text-base leading-snug">{shortTitle}</SheetTitle>
-          {teammate.description !== shortTitle && (
-            <SheetDescription className="text-[12px] leading-snug line-clamp-3">
-              {teammate.description}
-            </SheetDescription>
-          )}
-
-          {/* 用量统计 */}
-          {teammate.usage && (
-            <div className="flex items-center gap-3 text-[11px] text-muted-foreground/70 tabular-nums pt-1">
-              <span className="flex items-center gap-1">
-                <Clock className="h-3 w-3" />
-                {formatMs(
-                  teammate.endedAt
-                    ? teammate.endedAt - teammate.startedAt
-                    : Date.now() - teammate.startedAt,
-                )}
-              </span>
-              <span>{teammate.usage.toolUses} tools</span>
-              <span>{(teammate.usage.totalTokens / 1000).toFixed(1)}k tokens</span>
-            </div>
-          )}
-
-          {/* 输出文件路径 */}
-          {teammate.outputFile && (
-            <div className="flex items-center gap-1.5 rounded bg-muted/40 px-2 py-1 text-[10px] font-mono text-muted-foreground/60 mt-1">
-              <FileText className="h-3 w-3 shrink-0" />
-              <span className="break-all">{teammate.outputFile}</span>
-            </div>
-          )}
+          <SheetTitle className="text-base leading-snug">
+            {agentName ?? `Teammate #${teammate.index}`}
+          </SheetTitle>
+          <SheetDescription className="text-[12px] leading-snug sr-only">
+            Agent teammate 详细工作报告
+          </SheetDescription>
         </SheetHeader>
 
         {/* 内容区 */}
-        <div className="flex-1 overflow-y-auto px-6 py-4">
-          {/* 摘要（始终显示） */}
+        <div className="flex-1 overflow-y-auto">
+
+          {/* ── 1. 执行概览 ── */}
+          <div className="px-6 py-4 border-b border-border/30">
+            <div className="grid grid-cols-3 gap-3">
+              <div className="flex flex-col items-center rounded-lg bg-muted/30 px-3 py-2.5">
+                <Clock className="h-3.5 w-3.5 text-blue-500 mb-1" />
+                <span className="text-[13px] font-semibold tabular-nums">{formatMs(durationMs)}</span>
+                <span className="text-[10px] text-muted-foreground">耗时</span>
+              </div>
+              <div className="flex flex-col items-center rounded-lg bg-muted/30 px-3 py-2.5">
+                <Wrench className="h-3.5 w-3.5 text-amber-500 mb-1" />
+                <span className="text-[13px] font-semibold tabular-nums">
+                  {teammate.usage?.toolUses ?? teammate.toolHistory.length}
+                </span>
+                <span className="text-[10px] text-muted-foreground">工具调用</span>
+              </div>
+              <div className="flex flex-col items-center rounded-lg bg-muted/30 px-3 py-2.5">
+                <Coins className="h-3.5 w-3.5 text-emerald-500 mb-1" />
+                <span className="text-[13px] font-semibold tabular-nums">
+                  {teammate.usage ? `${(teammate.usage.totalTokens / 1000).toFixed(1)}k` : '-'}
+                </span>
+                <span className="text-[10px] text-muted-foreground">tokens</span>
+              </div>
+            </div>
+
+            {/* 时间信息 */}
+            <div className="flex items-center gap-3 mt-3 text-[10px] text-muted-foreground/60 tabular-nums">
+              <span>开始: {new Date(teammate.startedAt).toLocaleTimeString()}</span>
+              {teammate.endedAt && (
+                <span>结束: {new Date(teammate.endedAt).toLocaleTimeString()}</span>
+              )}
+            </div>
+          </div>
+
+          {/* ── 2. 任务描述 ── */}
+          <div className="px-6 py-4 border-b border-border/30">
+            <SectionHeader icon={<FileText className="h-3.5 w-3.5" />} title="任务描述" />
+            <div className="mt-2 rounded-lg border border-violet-500/20 bg-violet-500/5 px-4 py-3">
+              <div className="prose prose-sm dark:prose-invert max-w-none text-[13px]">
+                <MarkdownRenderer content={teammate.description} />
+              </div>
+            </div>
+          </div>
+
+          {/* ── 3. 工作摘要 ── */}
           {teammate.summary && (
-            <div className="mb-4 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
-              <p className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 mb-1">摘要</p>
-              <p className="text-sm text-foreground/80 leading-relaxed">{teammate.summary}</p>
+            <div className="px-6 py-4 border-b border-border/30">
+              <SectionHeader icon={<CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />} title="工作摘要" />
+              <div className="mt-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
+                <div className="prose prose-sm dark:prose-invert max-w-none text-[13px]">
+                  <MarkdownRenderer content={teammate.summary} />
+                </div>
+              </div>
             </div>
           )}
 
-          {/* 通过 SendMessage 发送给 team-lead 的消息（Agent 工作产出） */}
-          {inboxMessages && inboxMessages.length > 0 && (
-            <div className="mb-4">
-              <div className="flex items-center gap-2 mb-3">
-                <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
-                <p className="text-[12px] font-medium text-muted-foreground">
-                  {agentName ?? 'Agent'} 发送的消息
-                </p>
-              </div>
-              <div className="space-y-2">
-                {inboxMessages
-                  .filter((m) => {
-                    // 过滤掉系统消息
-                    try {
-                      const parsed = JSON.parse(m.text) as Record<string, unknown>;
-                      const t = parsed.type;
-                      if (t === 'idle_notification' || t === 'shutdown_request' || t === 'shutdown_approved') return false;
-                    } catch { /* 非 JSON，保留 */ }
-                    return true;
-                  })
-                  .map((msg, i) => {
-                    // 尝试解析 JSON 消息中的 content 字段
-                    // 始终显示完整 text 内容（text 是 Agent 的完整工作产出）
-                    let displayText = msg.text;
-                    try {
-                      const parsed = JSON.parse(msg.text) as Record<string, unknown>;
-                      if (typeof parsed.content === 'string') displayText = parsed.content;
-                    } catch { /* 非 JSON */ }
-                    return (
-                      <div key={i} className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2.5">
-                        {msg.summary && (
-                          <p className="text-[10px] font-medium text-muted-foreground/60 mb-1">{msg.summary}</p>
-                        )}
-                        <p className="text-[12px] text-foreground/80 leading-relaxed whitespace-pre-wrap">
-                          {displayText}
-                        </p>
-                        {msg.timestamp && (
-                          <p className="text-[9px] text-muted-foreground/40 mt-1.5">
-                            {new Date(msg.timestamp).toLocaleTimeString()}
-                          </p>
-                        )}
+          {/* ── 4. 工具使用记录 ── */}
+          {teammate.toolHistory.length > 0 && (
+            <div className="px-6 py-4 border-b border-border/30">
+              <button
+                onClick={() => setToolsExpanded((v) => !v)}
+                className="flex items-center gap-2 w-full group"
+              >
+                <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="text-[12px] font-medium text-muted-foreground">
+                  工具使用记录
+                </span>
+                <span className="text-[11px] text-muted-foreground/50">
+                  ({teammate.toolHistory.length} 次)
+                </span>
+                <span className="ml-auto">
+                  {toolsExpanded
+                    ? <ChevronUp className="h-3 w-3 text-muted-foreground/50" />
+                    : <ChevronDown className="h-3 w-3 text-muted-foreground/50" />}
+                </span>
+              </button>
+              {toolsExpanded && (
+                <div className="mt-3 space-y-1">
+                  {teammate.toolHistory.map((tool, i) => (
+                    <div
+                      key={`${tool}-${i}`}
+                      className="flex items-center gap-2 rounded px-2 py-1 text-[11px] hover:bg-muted/30 transition-colors"
+                    >
+                      <span className="text-[10px] text-muted-foreground/40 tabular-nums w-5 text-right shrink-0">
+                        {i + 1}
+                      </span>
+                      <span className="h-1.5 w-1.5 rounded-full bg-amber-500/60 shrink-0" />
+                      <span className="font-mono text-foreground/70">{tool}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* 不展开时显示紧凑标签 */}
+              {!toolsExpanded && (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {dedupeToolHistory(teammate.toolHistory).map(({ name, count }) => (
+                    <span
+                      key={name}
+                      className="inline-flex items-center gap-0.5 rounded bg-muted/50 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/70"
+                    >
+                      {name}
+                      {count > 1 && (
+                        <span className="text-[9px] text-muted-foreground/40">×{count}</span>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── 5. 通信记录（Inbox 消息） ── */}
+          {filteredInbox.length > 0 && (
+            <div className="px-6 py-4 border-b border-border/30">
+              <SectionHeader
+                icon={<MessageSquare className="h-3.5 w-3.5" />}
+                title={`${agentName ?? 'Agent'} 发送的消息`}
+                count={filteredInbox.length}
+              />
+              <div className="mt-3 space-y-3">
+                {filteredInbox.map((msg, i) => {
+                  let displayText = msg.text;
+                  try {
+                    const parsed = JSON.parse(msg.text) as Record<string, unknown>;
+                    if (typeof parsed.content === 'string') displayText = parsed.content;
+                  } catch { /* 非 JSON */ }
+                  return (
+                    <div key={i} className="rounded-lg border border-border/50 bg-muted/20 px-4 py-3">
+                      {msg.summary && (
+                        <p className="text-[10px] font-medium text-blue-500/70 mb-2">{msg.summary}</p>
+                      )}
+                      <div className="prose prose-sm dark:prose-invert max-w-none text-[13px]">
+                        <MarkdownRenderer content={displayText} />
                       </div>
-                    );
-                  })}
+                      {msg.timestamp && (
+                        <p className="text-[9px] text-muted-foreground/40 mt-2 pt-2 border-t border-border/20">
+                          {new Date(msg.timestamp).toLocaleTimeString()}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
 
-          {/* 产出文件内容 */}
-          {teammate.outputFile ? (
-            <>
-              <div className="flex items-center gap-2 mb-3">
-                <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" />
-                <p className="text-[12px] font-medium text-muted-foreground">Agent 工作产出</p>
+          {/* ── 6. 产出文件 ── */}
+          {teammate.outputFile && (
+            <div className="px-6 py-4">
+              <SectionHeader icon={<ExternalLink className="h-3.5 w-3.5" />} title="产出文件" />
+              <div className="mt-2 flex items-center gap-1.5 rounded bg-muted/40 px-2 py-1 text-[10px] font-mono text-muted-foreground/60">
+                <FileText className="h-3 w-3 shrink-0" />
+                <span className="break-all">{teammate.outputFile}</span>
               </div>
 
               {loading && (
@@ -271,19 +387,22 @@ function TeammateOutputSheet({ teammate, agentName, inboxMessages, open, onOpenC
               )}
 
               {error && (
-                <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                <div className="mt-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
                   {error}
                 </div>
               )}
 
               {content !== null && !loading && (
-                <div className="prose prose-sm dark:prose-invert max-w-none">
+                <div className="mt-3 prose prose-sm dark:prose-invert max-w-none rounded-lg border border-border/30 px-4 py-3">
                   <MarkdownRenderer content={content} />
                 </div>
               )}
-            </>
-          ) : (
-            !teammate.summary && (!inboxMessages || inboxMessages.length === 0) && (
+            </div>
+          )}
+
+          {/* 没有任何内容时的空状态 */}
+          {!teammate.outputFile && !teammate.summary && filteredInbox.length === 0 && (
+            <div className="px-6 py-4">
               <div className="rounded-lg border border-muted bg-muted/20 px-4 py-6 text-center">
                 <p className="text-sm text-muted-foreground">
                   {teammate.status === 'stopped'
@@ -294,7 +413,7 @@ function TeammateOutputSheet({ teammate, agentName, inboxMessages, open, onOpenC
                   task_notification 未到达，可查看主对话了解详情
                 </p>
               </div>
-            )
+            </div>
           )}
         </div>
       </SheetContent>

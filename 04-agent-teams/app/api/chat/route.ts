@@ -157,6 +157,64 @@ async function areAllWorkersIdle(sessionId: string, startedCount: number): Promi
 }
 
 
+/** task_notification 收集的摘要信息（用作 inbox 为空时的 fallback） */
+interface TaskNotificationSummary {
+  taskId: string;
+  status: 'completed' | 'failed' | 'stopped';
+  summary: string;
+  outputFile?: string;
+}
+
+/** inbox 重试轮询配置 */
+interface InboxRetryConfig {
+  maxAttempts: number;
+  delayMs: number;
+}
+
+const INBOX_RETRY_CONFIG: InboxRetryConfig = {
+  maxAttempts: 5,
+  delayMs: 2000,
+};
+
+/**
+ * 带重试的 inbox 轮询
+ * Workers 写入 inbox 有时序延迟，需要多次尝试
+ */
+async function pollInboxWithRetry(
+  inboxPath: string,
+  config: InboxRetryConfig,
+): Promise<InboxMessage[]> {
+  for (let attempt = 1; attempt <= config.maxAttempts; attempt++) {
+    const messages = await readUnreadTeamLeadMessages(inboxPath);
+    if (messages.length > 0) {
+      console.log(`📬 Inbox poll attempt ${attempt}/${config.maxAttempts}: found ${messages.length} messages`);
+      return messages;
+    }
+    if (attempt < config.maxAttempts) {
+      console.log(`📭 Inbox poll attempt ${attempt}/${config.maxAttempts}: empty, retrying in ${config.delayMs}ms`);
+      await new Promise<void>((resolve) => setTimeout(resolve, config.delayMs));
+    }
+  }
+  console.log(`📭 Inbox poll: exhausted ${config.maxAttempts} attempts, inbox still empty`);
+  return [];
+}
+
+/**
+ * 用 task_notification 的 summaries 构造 fallback resume prompt
+ * 当 inbox 为空但有 task 完成摘要时使用
+ */
+function formatSummaryFallbackPrompt(summaries: TaskNotificationSummary[]): string {
+  const sections = summaries.map((s) => {
+    const statusLabel = s.status === 'completed' ? '✅ 已完成' : `⚠️ ${s.status}`;
+    return `- **Task ${s.taskId}** (${statusLabel}): ${s.summary}`;
+  });
+  return (
+    `[系统通知] 你的工作者 Agent 已完成任务。以下是各任务的完成摘要：\n\n` +
+    sections.join('\n') +
+    `\n\n请基于以上任务摘要，向用户提供完整、详尽的最终回复。`
+  );
+}
+
 interface ToolActivityRecord {
   toolUseId: string;
   toolName: string;
@@ -233,6 +291,15 @@ export async function POST(req: NextRequest) {
           // 跟踪 Worker 任务状态（用于判断是否需要等待 inbox 消息）
           const startedTaskIds = new Set<string>();
           const completedTaskIds = new Set<string>();
+          // 收集 task_notification 的 summaries（用作 inbox 为空时的 fallback）
+          const taskNotificationSummaries: TaskNotificationSummary[] = [];
+          // 延迟发送的 result 数据（teams 活跃时不立即发送 result SSE）
+          interface DeferredUsage {
+            costUsd: number;
+            inputTokens: number;
+            outputTokens: number;
+          }
+          let deferredUsage: DeferredUsage | null = null;
 
           console.log('🔍 Starting chat:', {
             hasSessionId: !!finalSessionId,
@@ -300,7 +367,7 @@ export async function POST(req: NextRequest) {
                   type: 'metadata',
                   sessionId: sdkSessionId,
                   config: {
-                    model: 'claude-sonnet-4-5-20250929',
+                    model: 'claude-sonnet-4-6',
                   },
                   state: {
                     sessionId: sdkSessionId,
@@ -330,14 +397,14 @@ export async function POST(req: NextRequest) {
           //
           // 死锁场景：Worker 发送 idle_notification 后等待 team-lead 继续指派工作，
           // 但 team-lead 被 Task 工具阻塞，无法读取收件箱，造成相互等待。
-          // Watchdog 每 15 秒检查一次，若所有 Worker 均已 idle 但 Task 工具未返回，
+          // Watchdog 每 5 秒检查一次，若所有 Worker 均已 idle 但 Task 工具未返回，
           // 则强制终止主循环并触发 auto-resume（注入 inbox 内容让 team-lead 汇总结果）。
           const loopAbort = new AbortController();
           let abortedByWatchdog = false;
-          let resultSentByHandler = false; // 标记 complete 事件是否已发送 result
+          let completeSeen = false; // 标记是否收到过 complete 事件
 
-          // Watchdog 并行运行，每隔 15 秒检查一次 Worker idle 状态
-          const WATCHDOG_INTERVAL_MS = 15_000;
+          // Watchdog 并行运行，每隔 5 秒检查一次 Worker idle 状态（安全网）
+          const WATCHDOG_INTERVAL_MS = 5_000;
           const watchdogDone = (async () => {
             while (!loopAbort.signal.aborted) {
               // 等待 WATCHDOG_INTERVAL_MS 或 abort 信号
@@ -395,8 +462,32 @@ export async function POST(req: NextRequest) {
 
             // 跟踪 Worker 任务状态
             if (event.type === 'task_started') startedTaskIds.add(event.taskId);
-            if (event.type === 'task_notification') completedTaskIds.add(event.taskId);
-            if (event.type === 'complete') resultSentByHandler = true;
+            if (event.type === 'task_notification') {
+              completedTaskIds.add(event.taskId);
+              // 收集 summary 用作 fallback
+              if (event.summary) {
+                taskNotificationSummaries.push({
+                  taskId: event.taskId,
+                  status: event.status as 'completed' | 'failed' | 'stopped',
+                  summary: event.summary,
+                  outputFile: event.outputFile,
+                });
+              }
+            }
+            if (event.type === 'complete') {
+              completeSeen = true;
+              // 当有 teams 活跃时，存储 usage 但不立即发送 result SSE
+              if (startedTaskIds.size > 0 && event.usage) {
+                deferredUsage = {
+                  costUsd: event.usage.costUsd ?? 0,
+                  inputTokens: event.usage.inputTokens ?? 0,
+                  outputTokens: event.usage.outputTokens ?? 0,
+                };
+              }
+            }
+
+            // 是否延迟 result SSE（teams 活跃时延迟到 resume 之后）
+            const shouldDeferResult = startedTaskIds.size > 0 && event.type === 'complete';
 
             await handleAgentEvent(
               event,
@@ -407,7 +498,8 @@ export async function POST(req: NextRequest) {
               assistantContent,
               (content) => { assistantContent = content; },
               assistantMessageId,
-              toolActivities
+              toolActivities,
+              shouldDeferResult,
             );
           }
 
@@ -415,10 +507,147 @@ export async function POST(req: NextRequest) {
           loopAbort.abort();
           await watchdogDone;
 
-          // 如果是 Watchdog 终止的（Worker 卡死），需要手动发送 result 事件来重置前端状态
-          if (abortedByWatchdog && !resultSentByHandler) {
-            console.log('🔔 Watchdog aborted — sending synthetic result event');
-            const syntheticResult = JSON.stringify({
+          const hasActiveTeam = startedTaskIds.size > 0;
+
+          // query() 结束（正常完成或 Watchdog 终止）
+          console.log(`📊 Workers: started=${startedTaskIds.size} completed=${completedTaskIds.size} watchdog=${abortedByWatchdog}`);
+
+          // === Auto-Resume：teammates 完成后注入结果让 team-lead 生成最终汇总 ===
+          //
+          // 当有 teammates 时：
+          // 1. result SSE 已被延迟（deferredUsage 存储了 usage 数据）
+          // 2. 先发送 waiting_resume 通知前端保持 streaming 状态
+          // 3. 轮询 inbox 获取 worker 结果（带重试）
+          // 4. 用 inbox 内容或 task_notification summaries 作为 prompt resume session
+          // 5. 流式传输 resume 响应到前端
+          // 6. 最后发送延迟的 result SSE
+          if (hasActiveTeam && finalSessionId) {
+            // 通知前端：正在收集 teammate 结果
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+              type: 'waiting_resume',
+              data: { message: '正在收集 teammate 工作结果...' },
+            })}\n\n`));
+
+            // 构造 resume prompt（优先 inbox，fallback 到 summaries）
+            let resumePrompt: string | null = null;
+
+            const inboxInfo = await findTeamLeadInboxPath(finalSessionId);
+            if (inboxInfo) {
+              const unreadMessages = await pollInboxWithRetry(
+                inboxInfo.inboxPath,
+                INBOX_RETRY_CONFIG,
+              );
+              if (unreadMessages.length > 0) {
+                await markInboxAsRead(inboxInfo.inboxPath);
+                resumePrompt = formatInboxPrompt(unreadMessages);
+                console.log(`📬 Using ${unreadMessages.length} inbox messages for resume`);
+              }
+            }
+
+            // Fallback：用 task_notification summaries
+            if (!resumePrompt && taskNotificationSummaries.length > 0) {
+              console.log(`📋 Inbox empty, using ${taskNotificationSummaries.length} task summaries as fallback`);
+              resumePrompt = formatSummaryFallbackPrompt(taskNotificationSummaries);
+            }
+
+            if (resumePrompt) {
+              // 创建 Resume PromaAgent（恢复同一会话）
+              const resumeAgent = new PromaAgent({
+                apiKey,
+                workingDirectory: process.cwd(),
+                resumeSessionId: finalSessionId,
+                ...(!isBypass && { canUseTool }),
+                ...(permissionMode && {
+                  permissionMode: permissionMode as 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan',
+                }),
+              });
+
+              const resumeMessageId = `msg-${Date.now()}-resume`;
+
+              // 通知前端：开始 resume 流式输出（前端创建新的 assistant message）
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                type: 'resume_start',
+                data: { messageId: resumeMessageId },
+              })}\n\n`));
+
+              let resumeContent = '';
+
+              try {
+                for await (const event of resumeAgent.chat(resumePrompt)) {
+                  if (event.type === 'text_delta') {
+                    resumeContent += event.text;
+                    // 流式传输每个 text delta 到前端（复用 content 事件）
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                      type: 'content',
+                      data: event.text,
+                      sessionId: finalSessionId,
+                    })}\n\n`));
+                  }
+                  // resume 期间的工具事件也转发到前端
+                  if (event.type === 'tool_start') {
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                      type: 'tool_start',
+                      data: {
+                        toolName: event.toolName,
+                        toolUseId: event.toolUseId,
+                        input: event.input,
+                        intent: event.intent,
+                        displayName: event.displayName,
+                        parentToolUseId: event.parentToolUseId,
+                      },
+                      sessionId: finalSessionId,
+                    })}\n\n`));
+                  }
+                  if (event.type === 'tool_result') {
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+                      type: 'tool_result',
+                      data: {
+                        toolUseId: event.toolUseId,
+                        toolName: event.toolName,
+                        result: event.result,
+                        isError: event.isError,
+                        parentToolUseId: event.parentToolUseId,
+                      },
+                      sessionId: finalSessionId,
+                    })}\n\n`));
+                  }
+                }
+              } catch (resumeError) {
+                console.error('❌ Resume agent error:', resumeError);
+                // 已流式的部分内容保留，继续发送 result
+              }
+
+              // 保存 resume 消息到存储
+              if (resumeContent) {
+                const resumeMessage: ChatMessage = {
+                  id: resumeMessageId,
+                  role: 'assistant',
+                  content: resumeContent,
+                  timestamp: Date.now(),
+                };
+                await storage.appendMessage(finalSessionId, resumeMessage);
+              }
+
+              console.log(`✅ Resume complete, content length: ${resumeContent.length}`);
+            } else {
+              console.log('⚠️ No resume content available (no inbox messages, no summaries)');
+            }
+
+            // 发送延迟的 result SSE
+            const resultPayload = deferredUsage ?? { costUsd: 0, inputTokens: 0, outputTokens: 0 };
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+              type: 'result',
+              data: {
+                sessionId: finalSessionId,
+                totalCostUsd: resultPayload.costUsd,
+                inputTokens: resultPayload.inputTokens,
+                outputTokens: resultPayload.outputTokens,
+              },
+            })}\n\n`));
+          } else if (abortedByWatchdog && !completeSeen) {
+            // Watchdog 终止但没收到 complete 事件：发送兜底 result
+            console.log('🔔 Watchdog aborted without complete — sending synthetic result');
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({
               type: 'result',
               data: {
                 sessionId: finalSessionId || sessionId,
@@ -426,60 +655,7 @@ export async function POST(req: NextRequest) {
                 inputTokens: 0,
                 outputTokens: 0,
               },
-            });
-            controller.enqueue(encoder.encode(`data: ${syntheticResult}\n\n`));
-          }
-
-          // query() 结束（正常完成或 Watchdog 终止）
-          console.log(`📊 Workers: started=${startedTaskIds.size} completed=${completedTaskIds.size} watchdog=${abortedByWatchdog}`);
-
-          // 自动恢复：检查 team-lead 收件箱中的工作者结果
-          // Workers 通过 SendMessage 把完整结果写入 team-lead 的 inbox，
-          // 但 Task 工具返回值只包含 "completed" 状态，team-lead 没有实际数据。
-          // 需要将完整结果注入新的对话轮次，让 team-lead 生成最终回复。
-          if (startedTaskIds.size > 0 && finalSessionId) {
-            const inboxInfo = await findTeamLeadInboxPath(finalSessionId);
-            if (inboxInfo) {
-              const unreadMessages = await readUnreadTeamLeadMessages(inboxInfo.inboxPath);
-              if (unreadMessages.length > 0) {
-                console.log(`📬 Found ${unreadMessages.length} unread inbox messages, starting auto-resume`);
-                await markInboxAsRead(inboxInfo.inboxPath);
-
-                const resumePrompt = formatInboxPrompt(unreadMessages);
-
-                // 创建 Resume PromaAgent（恢复同一会话）
-                const resumeAgent = new PromaAgent({
-                  apiKey,
-                  workingDirectory: process.cwd(),
-                  resumeSessionId: finalSessionId,
-                  ...(!isBypass && { canUseTool }),
-                  ...(permissionMode && {
-                    permissionMode: permissionMode as 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan',
-                  }),
-                });
-
-                let resumeContent = '';
-                const resumeMessageId = `msg-${Date.now()}-resume`;
-
-                // 收集 resume 的完整文本响应（工具调用在后端静默执行）
-                for await (const event of resumeAgent.chat(resumePrompt)) {
-                  if (event.type === 'text_delta') {
-                    resumeContent += event.text;
-                  }
-                  // 忽略 complete / tool / error 等事件，仅收集文本
-                }
-
-                // 将 resume 结果作为新消息发送给前端
-                if (resumeContent) {
-                  const resumeData = JSON.stringify({
-                    type: 'resume_complete',
-                    data: { messageId: resumeMessageId, content: resumeContent },
-                  });
-                  controller.enqueue(encoder.encode(`data: ${resumeData}\n\n`));
-                  console.log(`✅ Resume complete, content length: ${resumeContent.length}`);
-                }
-              }
-            }
+            })}\n\n`));
           }
 
           safeCloseController(controller);
@@ -552,7 +728,8 @@ async function handleAgentEvent(
   assistantContent: string,
   setAssistantContent: (content: string) => void,
   assistantMessageId: string,
-  toolActivities: Map<string, ToolActivityRecord>
+  toolActivities: Map<string, ToolActivityRecord>,
+  deferResult?: boolean,
 ): Promise<void> {
   switch (event.type) {
     case 'text_delta': {
@@ -713,17 +890,21 @@ async function handleAgentEvent(
         });
       }
 
-      // 发送完成事件到前端
-      const resultData = JSON.stringify({
-        type: 'result',
-        data: {
-          sessionId,
-          totalCostUsd: event.usage?.costUsd ?? 0,
-          inputTokens: event.usage?.inputTokens ?? 0,
-          outputTokens: event.usage?.outputTokens ?? 0,
-        },
-      });
-      controller.enqueue(encoder.encode(`data: ${resultData}\n\n`));
+      // 发送完成事件到前端（teams 活跃时延迟发送，等 resume 完成后再发）
+      if (!deferResult) {
+        const resultData = JSON.stringify({
+          type: 'result',
+          data: {
+            sessionId,
+            totalCostUsd: event.usage?.costUsd ?? 0,
+            inputTokens: event.usage?.inputTokens ?? 0,
+            outputTokens: event.usage?.outputTokens ?? 0,
+          },
+        });
+        controller.enqueue(encoder.encode(`data: ${resultData}\n\n`));
+      } else {
+        console.log('⏳ Result deferred — waiting for auto-resume');
+      }
       break;
     }
 

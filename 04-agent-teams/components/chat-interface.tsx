@@ -36,6 +36,8 @@ export function ChatInterface() {
   // 用于终止请求的 refs
   const abortControllerRef = useRef<AbortController | null>(null);
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
+  // 跟踪当前活跃的 assistant message ID（resume 时会更新为新 message）
+  const currentAssistantIdRef = useRef<string>('');
 
   // 创建 ToolActivityManager 实例
   const toolActivityManager = useMemo(() => new ToolActivityManager(), []);
@@ -179,6 +181,7 @@ export function ChatInterface() {
 
     // 创建助手消息占位符
     const assistantMessageId = `msg-${Date.now()}-assistant`;
+    currentAssistantIdRef.current = assistantMessageId;
     const assistantMessage: ChatMessage = {
       id: assistantMessageId,
       role: 'assistant',
@@ -231,10 +234,11 @@ export function ChatInterface() {
             const data = JSON.parse(line.slice(6));
 
             if (data.type === 'content') {
-              // 更新流式内容
+              // 更新流式内容（使用 ref 跟踪的当前 message ID）
+              const targetId = currentAssistantIdRef.current;
               setMessages((prev) =>
                 prev.map((msg) =>
-                  msg.id === assistantMessageId
+                  msg.id === targetId
                     ? { ...msg, content: msg.content + data.data }
                     : msg
                 )
@@ -242,13 +246,35 @@ export function ChatInterface() {
               if (data.sessionId && !sessionId) {
                 setSessionId(data.sessionId);
               }
-            } else if (data.type === 'waiting_workers') {
-              // 正在等待 Worker 完成，保持前端显示运行状态（无需额外操作）
+            } else if (data.type === 'waiting_workers' || data.type === 'waiting_resume') {
+              // 正在等待 Worker 完成 / 正在收集 teammate 结果
+              // 保持前端 streaming 状态，无需额外操作
+            } else if (data.type === 'resume_start') {
+              // resume 开始：结束当前 assistant message，创建新的 streaming message
+              const resumeMessageId = data.data.messageId as string;
+              const prevId = currentAssistantIdRef.current;
+              currentAssistantIdRef.current = resumeMessageId;
+              setMessages((prev) => {
+                // 结束前一个 assistant message 的 streaming 光标
+                const updated = prev.map((msg) =>
+                  msg.id === prevId && msg.isStreaming
+                    ? { ...msg, isStreaming: false }
+                    : msg
+                );
+                // 添加新的 resume assistant message
+                return [...updated, {
+                  id: resumeMessageId,
+                  role: 'assistant' as const,
+                  content: '',
+                  timestamp: Date.now(),
+                  isStreaming: true,
+                }];
+              });
             } else if (data.type === 'resume_complete') {
-              // 自动恢复完成：一次性添加完整的助手消息
+              // LEGACY：向后兼容旧版一次性 resume 事件
               setMessages((prev) => [...prev, {
                 id: data.data.messageId,
-                role: 'assistant',
+                role: 'assistant' as const,
                 content: data.data.content,
                 timestamp: Date.now(),
                 isStreaming: false,
@@ -294,9 +320,10 @@ export function ChatInterface() {
             } else if (data.type === 'result') {
               // 完成 — 将剩余 running teammates 标记为 stopped（兜底）
               agentTeamStore.finalizeRunning();
+              const targetId = currentAssistantIdRef.current;
               setMessages((prev) =>
                 prev.map((msg) =>
-                  msg.id === assistantMessageId
+                  msg.id === targetId
                     ? { ...msg, isStreaming: false }
                     : msg
                 )
@@ -309,9 +336,10 @@ export function ChatInterface() {
             } else if (data.type === 'error') {
               // 错误 — 同样兜底未完成的 teammates
               agentTeamStore.finalizeRunning();
+              const targetId = currentAssistantIdRef.current;
               setMessages((prev) =>
                 prev.map((msg) =>
-                  msg.id === assistantMessageId
+                  msg.id === targetId
                     ? {
                         ...msg,
                         content: `Error: ${data.data.error}`,
@@ -334,7 +362,7 @@ export function ChatInterface() {
       console.error('Error:', error);
       setMessages((prev) =>
         prev.map((msg) =>
-          msg.id === assistantMessageId
+          msg.id === currentAssistantIdRef.current
             ? {
                 ...msg,
                 content: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,

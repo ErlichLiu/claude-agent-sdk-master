@@ -28,7 +28,7 @@ import { getDefaultOptions, mergeMcpServers, type McpServerConfig } from './opti
 export interface PromaAgentConfig {
   /** Anthropic API 密钥 */
   apiKey: string;
-  /** 使用的模型（默认：claude-sonnet-4-5-20250929） */
+  /** 使用的模型（默认：claude-sonnet-4-6） */
   model?: string;
   /** 文件操作的工作目录 */
   workingDirectory: string;

@@ -157,7 +157,7 @@ export async function POST(req: NextRequest) {
                   type: 'metadata',
                   sessionId: sdkSessionId,
                   config: {
-                    model: 'claude-sonnet-4-5-20250929',
+                    model: 'claude-sonnet-4-6',
                   },
                   state: {
                     sessionId: sdkSessionId,
